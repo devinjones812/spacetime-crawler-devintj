@@ -1,7 +1,7 @@
 import os
 import logging
 from hashlib import sha256
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urldefrag
 
 def get_logger(name, filename=None):
     logger = logging.getLogger(name)
@@ -23,13 +23,23 @@ def get_logger(name, filename=None):
 
 
 def get_urlhash(url):
+    """
+    Generate hash for URL, excluding fragment for uniqueness.
+    Per assignment spec: URLs with different fragments are considered the same.
+    """
+    # First defragment the URL
+    url, _ = urldefrag(url)
     parsed = urlparse(url)
-    # everything other than scheme.
+    # Hash without fragment - netloc, path, params, query only
     return sha256(
-        f"{parsed.netloc}/{parsed.path}/{parsed.params}/"
-        f"{parsed.query}/{parsed.fragment}".encode("utf-8")).hexdigest()
+        f"{parsed.netloc.lower()}/{parsed.path}/{parsed.params}/"
+        f"{parsed.query}".encode("utf-8")).hexdigest()
+
 
 def normalize(url):
-    if url.endswith("/"):
+    """Normalize URL by removing trailing slashes and fragments."""
+    # Defragment first
+    url, _ = urldefrag(url)
+    if url.endswith("/") and len(url) > 1:
         return url.rstrip("/")
     return url
