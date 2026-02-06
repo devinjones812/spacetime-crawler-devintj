@@ -6,6 +6,7 @@ import multiprocessing as mp
 import os
 import signal
 import sys
+import threading
 
 from utils import get_logger
 from utils.server_registration import get_cache_server
@@ -112,7 +113,54 @@ def main(config_file, restart):
     cparser = ConfigParser()
     cparser.read(config_file)
     config = Config(cparser)
-    config.cache_server = get_cache_server(config, restart)
+
+    # Attempt to connect to cache server with timeout
+    print(f"Connecting to cache server at {config.host}:{config.port}...")
+    print(f"Using user agent: {config.user_agent}")
+    print("Waiting for server response (timeout: 10 seconds)...")
+
+    cache_server = [None]
+    error = [None]
+
+    def get_server():
+        try:
+            cache_server[0] = get_cache_server(config, restart)
+        except Exception as e:
+            error[0] = e
+
+    thread = threading.Thread(target=get_server, daemon=True)
+    thread.start()
+    thread.join(timeout=10)
+
+    if thread.is_alive():
+        # Server didn't respond in time
+        print("\n" + "="*80)
+        print("ERROR: Cache server connection timeout after 10 seconds.")
+        print(f"\nThe UCI cache server ({config.host}:{config.port}) is likely DOWN.")
+        print("\nWhat to do:")
+        print("  1. Check Ed Discussion for server status updates")
+        print("  2. Ask your TA/instructor if the server is running")
+        print("  3. Verify your user agent in config.ini is correct")
+        print("  4. Try again later when the server is back online")
+        print("="*80 + "\n")
+        sys.exit(1)
+
+    if error[0]:
+        raise error[0]
+
+    config.cache_server = cache_server[0]
+    print("✓ Successfully connected to cache server!")
+
+    if restart:
+        import scraper
+        scraper.analytics.reset()
+        with scraper.exact_hashes_lock:
+            scraper.exact_hashes.clear()
+        for f in ("crawler_report.json", "trap_report.json"):
+            if os.path.exists(f):
+                os.remove(f)
+                print(f"  Removed stale {f}")
+
     crawler = Crawler(config, restart)
     logger.info(
         f"Starting crawler with {config.threads_count} threads, "

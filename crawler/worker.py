@@ -58,33 +58,40 @@ class Worker(Thread):
             try:
                 # Download the URL
                 resp = download(tbd_url, self.config, self.logger)
-                
+
+                # Server/network error — re-queue so the URL is retried
+                if resp.status == 599:
+                    self.logger.warning(
+                        f"Server error for {tbd_url}, re-queuing for retry")
+                    self.frontier.mark_url_failed(tbd_url)
+                    continue
+
                 self.logger.info(
                     f"Downloaded {tbd_url}, status <{resp.status}>, "
                     f"using cache {self.config.cache_server}.")
-                
+
                 # Process with scraper
                 scraped_urls = scraper.scraper(tbd_url, resp)
-                
+
                 # Add discovered URLs to frontier
                 for scraped_url in scraped_urls:
                     self.frontier.add_url(scraped_url)
-                
+
                 # Mark as complete
                 self.frontier.mark_url_complete(tbd_url)
-                
+
                 urls_processed += 1
-                
+
                 # Log progress periodically
                 if urls_processed % 50 == 0:
                     stats = self.frontier.get_stats()
                     self.logger.info(
                         f"Worker-{self.worker_id} progress: {urls_processed} processed, "
                         f"Frontier: {stats['pending']} pending, {stats['total_seen']} seen")
-            
+
             except Exception as e:
                 self.logger.error(f"Error processing {tbd_url}: {e}")
-                self.frontier.mark_url_complete(tbd_url)
+                self.frontier.mark_url_failed(tbd_url)
             
             # Note: Politeness delay is now handled by the Frontier's per-domain tracking
             # The frontier will not return a URL for a domain until the delay has passed

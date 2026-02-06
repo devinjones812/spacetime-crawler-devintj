@@ -29,8 +29,8 @@ MAX_DEBUG_INVALID = 10
 
 class CrawlerAnalytics:
     """Thread-safe storage for crawler analytics data."""
-    
-    def __init__(self):
+
+    def __init__(self, resume_file="crawler_report.json"):
         # Re-entrant lock prevents deadlocks when helper methods
         # call other methods that also acquire the lock.
         self._lock = RLock()
@@ -41,8 +41,63 @@ class CrawlerAnalytics:
         self.simhash_fingerprints = {}  # url -> simhash value
         self.url_patterns = defaultdict(int)  # pattern -> count (for trap detection)
         self.stopwords = set()
+
+        # Track cumulative count separately for accurate resumption
+        self.previous_unique_count = 0
+
+        # Trap tracking (NEW!)
+        self.traps_detected = defaultdict(lambda: {"count": 0, "examples": []})
+        self.trap_patterns_triggered = defaultdict(int)  # pattern -> how many times hit limit
+
         self._load_stopwords()
-        
+        self._load_previous_report(resume_file)
+
+    def _load_previous_report(self, filepath):
+        """Load previous analytics to resume from where we left off."""
+        if not os.path.exists(filepath):
+            print(f"[ANALYTICS] No previous report found at {filepath}, starting fresh")
+            return
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Restore longest page
+            self.longest_page = data.get("longest_page", {"url": "", "word_count": 0})
+
+            # Restore word frequencies - use ALL words if available, fallback to top 50
+            word_data = data.get("all_word_frequencies", data.get("top_50_words", []))
+            for word, count in word_data:
+                self.word_frequencies[word] = count
+
+            # Restore subdomains (can't restore exact URLs, but can track counts)
+            for subdomain, count in data.get("subdomains", []):
+                # Create dummy entries to maintain count
+                self.subdomains[subdomain] = set([f"{subdomain}_page_{i}" for i in range(count)])
+
+            self.previous_unique_count = data.get("unique_pages_count", 0)
+            print(f"[ANALYTICS] Loaded previous report: {self.previous_unique_count} pages, "
+                  f"{len(self.word_frequencies)} words, {len(self.subdomains)} subdomains")
+            print(f"[ANALYTICS] Resuming analytics - new pages will add to this count")
+            print(f"[ANALYTICS] Total unique pages will be: {self.previous_unique_count} + new pages")
+
+        except Exception as e:
+            print(f"[ANALYTICS] Error loading previous report: {e}, starting fresh")
+
+    def reset(self):
+        """Reset all analytics data for a clean restart."""
+        with self._lock:
+            self.unique_pages.clear()
+            self.longest_page = {"url": "", "word_count": 0}
+            self.word_frequencies.clear()
+            self.subdomains.clear()
+            self.simhash_fingerprints.clear()
+            self.url_patterns.clear()
+            self.previous_unique_count = 0
+            self.traps_detected.clear()
+            self.trap_patterns_triggered.clear()
+            print("[ANALYTICS] Reset all analytics data for fresh start")
+
     def _load_stopwords(self):
         """Load stopwords from file."""
         stopwords_path = os.path.join(os.path.dirname(__file__), "stopwords.txt")
@@ -56,30 +111,9 @@ class CrawlerAnalytics:
                         # Also add version without apostrophe
                         self.stopwords.add(word.replace("'", ""))
         except FileNotFoundError:
-            # Default stopwords if file not found
-            self.stopwords = {
-                "a", "about", "above", "after", "again", "against", "all", "am", "an",
-                "and", "any", "are", "arent", "as", "at", "be", "because", "been",
-                "before", "being", "below", "between", "both", "but", "by", "cant",
-                "cannot", "could", "couldnt", "did", "didnt", "do", "does", "doesnt",
-                "doing", "dont", "down", "during", "each", "few", "for", "from",
-                "further", "had", "hadnt", "has", "hasnt", "have", "havent", "having",
-                "he", "hed", "hell", "hes", "her", "here", "heres", "hers", "herself",
-                "him", "himself", "his", "how", "hows", "i", "id", "ill", "im", "ive",
-                "if", "in", "into", "is", "isnt", "it", "its", "itself", "lets", "me",
-                "more", "most", "mustnt", "my", "myself", "no", "nor", "not", "of",
-                "off", "on", "once", "only", "or", "other", "ought", "our", "ours",
-                "ourselves", "out", "over", "own", "same", "shant", "she", "shed",
-                "shell", "shes", "should", "shouldnt", "so", "some", "such", "than",
-                "that", "thats", "the", "their", "theirs", "them", "themselves", "then",
-                "there", "theres", "these", "they", "theyd", "theyll", "theyre",
-                "theyve", "this", "those", "through", "to", "too", "under", "until",
-                "up", "very", "was", "wasnt", "we", "wed", "well", "were", "werent",
-                "weve", "what", "whats", "when", "whens", "where", "wheres", "which",
-                "while", "who", "whos", "whom", "why", "whys", "with", "wont", "would",
-                "wouldnt", "you", "youd", "youll", "youre", "youve", "your", "yours",
-                "yourself", "yourselves"
-            }
+            print("[WARNING] stopwords.txt not found, using minimal default stopwords")
+            # Minimal fallback if stopwords.txt is missing
+            self.stopwords = {"a", "an", "and", "the", "to", "of", "in", "is", "it", "for"}
     
     def add_page(self, url, word_count, words, subdomain):
         """Record a page's analytics data."""
@@ -93,7 +127,7 @@ class CrawlerAnalytics:
             
             # Track word frequencies (excluding stopwords)
             for word in words:
-                if word not in self.stopwords and len(word) > 1:
+                if word.isalpha() and len(word) > 1 and word not in self.stopwords:
                     self.word_frequencies[word] += 1
             
             # Track subdomain
@@ -140,23 +174,79 @@ class CrawlerAnalytics:
         """Get current analytics statistics."""
         with self._lock:
             return {
-                "unique_pages": len(self.unique_pages),
+                "unique_pages": self.previous_unique_count + len(self.unique_pages),
                 "longest_page": self.longest_page.copy(),
                 "total_words_tracked": len(self.word_frequencies),
                 "total_subdomains": len(self.subdomains)
             }
     
+    def record_trap(self, url, trap_type, pattern=None):
+        """Record a URL that was blocked as a trap."""
+        with self._lock:
+            trap_entry = self.traps_detected[trap_type]
+            trap_entry["count"] += 1
+
+            # Save up to 10 examples per trap type
+            if len(trap_entry["examples"]) < 10:
+                example = {"url": url}
+                if pattern:
+                    example["pattern"] = pattern
+                trap_entry["examples"].append(example)
+
+            # Track pattern frequency traps
+            if pattern and "pattern_frequency" in trap_type:
+                self.trap_patterns_triggered[pattern] += 1
+
     def save_report(self, filepath="crawler_report.json"):
         """Save analytics to a JSON file."""
         with self._lock:
+            # Include cumulative count from previous runs
+            total_unique = self.previous_unique_count + len(self.unique_pages)
+
+            # Save ALL word frequencies for accurate resumption (not just top 50)
+            all_words = sorted(self.word_frequencies.items(), key=lambda x: (-x[1], x[0]))
+
             report = {
-                "unique_pages_count": len(self.unique_pages),
+                "unique_pages_count": total_unique,
                 "longest_page": self.longest_page,
-                "top_50_words": self.get_top_words(50),
+                "top_50_words": all_words[:50],  # Top 50 for the report
+                "all_word_frequencies": all_words,  # ALL words for resumption
                 "subdomains": self.get_subdomain_stats()
             }
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
+
+    def save_trap_report(self, filepath="trap_report.json"):
+        """Save trap detection report for analysis."""
+        with self._lock:
+            # Convert defaultdict to regular dict for JSON
+            traps_dict = {}
+            total_blocked = 0
+            for trap_type, data in self.traps_detected.items():
+                traps_dict[trap_type] = {
+                    "count": data["count"],
+                    "examples": data["examples"]
+                }
+                total_blocked += data["count"]
+
+            report = {
+                "summary": {
+                    "total_urls_blocked": total_blocked,
+                    "trap_types_detected": len(traps_dict),
+                    "top_patterns_blocked": sorted(
+                        self.trap_patterns_triggered.items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:20]
+                },
+                "trap_details": traps_dict
+            }
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2)
+
+            print(f"\n[TRAP REPORT] Blocked {total_blocked} URLs across {len(traps_dict)} trap types")
+            print(f"[TRAP REPORT] Report saved to {filepath}")
 
 
 # Global analytics instance
@@ -275,15 +365,45 @@ def has_low_information(text, word_count, threshold_words=50, threshold_ratio=0.
     # Too few words
     if word_count < threshold_words:
         return True
-    
+
     # Check text to content ratio
     if len(text) > 0:
         # If the text is mostly numbers or single characters
         alpha_count = sum(1 for c in text if c.isalpha())
         if alpha_count / len(text) < threshold_ratio:
             return True
-    
+
     return False
+
+
+def is_soft_404(text):
+    """
+    Detect soft 404s - pages that return 200 but are actually error pages.
+    Returns True if page appears to be an error page.
+    """
+    if len(text) > 1000:
+        # Only check short pages (real 404s are usually brief)
+        return False
+
+    text_lower = text.lower()
+    # Count how many indicators are present
+    indicator_count = sum(1 for indicator in SOFT_404_INDICATORS if indicator in text_lower)
+
+    # If multiple indicators in a short page, likely a soft 404
+    return indicator_count >= 2
+
+
+def is_low_value_path(url):
+    """
+    Check if URL path is known to contain low-value content.
+    Returns True if path should be skipped.
+    """
+    try:
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+        return any(path_lower.startswith(prefix) for prefix in LOW_VALUE_PATHS)
+    except Exception:
+        return False
 
 
 # ============================================================================
@@ -393,16 +513,33 @@ def normalize_url(url):
 
 # Patterns that indicate potential traps
 TRAP_PATTERNS = [
+    # GitLab repository traps (commits, trees, blobs — effectively infinite)
+    r"/-/",
+
+    # Photo gallery traps (like eppstein/pix)
+    r"/pix/.+\.html$",  # Individual photo pages
+    r"/photos?/.+\.html$",
+    r"/gallery/.+\.html$",
+    r"/images?/.+\.html$",
+    r"/(spring|summer|fall|winter)\d{2}\.html$",  # Seasonal galleries
+
+    # Course material traps (like dechter slides)
+    r"/slides?/node\d+\.html?$",  # Slide pagination (node1, node2, etc.)
+    r"/slides?/slide\d+\.html?$",  # Alternative slide format
+    r"/slides?/img\d+\.html?$",   # Image slides
+    r"/lectures?/.+/node\d+\.html?$",  # Lecture slides
+    r"/presentations?/.+/tsld\d+\.htm",  # Presentation slides (tsld001, tsld002, etc.)
+    r"/presentations?/.+/sld\d+\.htm",   # Presentation slides (sld001, sld002, etc.)
+    r"/wisen/wisen\d+/",  # WISEN conference presentations (major trap)
+
     # Calendar traps
     r"/calendar[/\?].*\d{4}",
     r"/events?[/\?].*\d{4}",
-    r"/\d{4}/\d{2}/\d{2}",  # Date-based URLs
-    r"/\d{4}-\d{2}-\d{2}",
     r"[?&]date=",
     r"[?&]month=",
     r"[?&]year=",
     r"[?&]day=",
-    
+
     # Pagination/sorting traps
     r"[?&]page=\d+",
     r"[?&]start=\d+",
@@ -426,11 +563,28 @@ TRAP_PATTERNS = [
     r"[?&]rev=",
     r"[?&]version=",
     r"[?&]diff=",
+
+    # Apache directory listing sort parameters (duplicate views of same listing)
+    r"[?&]C=[NMSD]",
+
+    # Trac wiki raw file attachments (binary downloads, not web pages)
+    r"/raw-attachment/",
+
+    # DokuWiki traps (namespace browser creates combinatorial explosion)
     r"/doku\.php",
-    
-    # File listing traps
-    r"/files/",
-    r"/download/",
+
+    # DokuWiki namespace index (duplicate sidebar content per page)
+    r"[?&]idx=",
+
+    # Calendar export downloads (not HTML pages)
+    r"[?&]ical=",
+    r"[?&]outlook-ical=",
+
+    # Trac timeline with timestamps (infinite date variations)
+    r"/timeline\?",
+
+    # Raw text wiki exports (duplicate of HTML version)
+    r"[?&]format=txt",
 ]
 
 # Compiled trap patterns for efficiency
@@ -444,6 +598,59 @@ MAX_PATH_DEPTH = 10
 
 # Maximum repeated path segments
 MAX_REPEATED_SEGMENTS = 3
+
+# Maximum content size (bytes) - skip very large files
+MAX_CONTENT_SIZE = 5_000_000  # 5 MB
+
+# ============================================================================
+# LOW-VALUE CONTENT DETECTION
+# ============================================================================
+
+# Path prefixes known to contain low-value content
+LOW_VALUE_PATHS = [
+    "/wp-content/",      # WordPress assets
+    "/wp-includes/",     # WordPress system files
+    "/assets/",          # Asset directories
+    "/static/",          # Static file directories
+    "/_includes/",       # Template includes
+    "/templates/",       # Template directories
+    "/print/",           # Print versions (duplicate content)
+    "/mobile/",          # Mobile versions (duplicate content)
+    "/feed/",            # RSS feeds
+    "/feeds/",           # RSS feeds
+    "/xmlrpc.php",       # WordPress API
+    "/trackback/",       # Trackback URLs
+]
+
+# Soft 404 indicators (pages that return 200 but are actually errors)
+SOFT_404_INDICATORS = [
+    "page not found",
+    "404",
+    "not found",
+    "does not exist",
+    "no longer available",
+    "has been removed",
+    "has been deleted",
+    "cannot be found",
+    "could not be found",
+]
+
+# ============================================================================
+# TRAP DETECTION THRESHOLDS - ADJUST BASED ON YOUR DEFINITION OF "LOW VALUE"
+# ============================================================================
+# The assignment requires you to define "low information value pages"
+# Adjust these based on your group's definition:
+
+# Fine-grained: Max URLs per specific pattern (e.g., /pix/action/photo{N}.html)
+# Lower = more aggressive filtering of repetitive content
+# Higher = more permissive, crawls more similar pages
+MAX_FINE_PATTERN_COUNT = 50
+
+# Coarse-grained: Max URLs per path prefix (e.g., /~eppstein/pix/*)
+# This prevents traps like photo galleries (2820+ similar pages)
+# Set to 0 to disable, or increase if you want more coverage
+# Recommended: 100-300 for balance between coverage and trap avoidance
+MAX_COARSE_PATTERN_COUNT = 200
 
 
 def is_trap(url):
@@ -494,14 +701,27 @@ def get_url_pattern(url):
     """
     Extract URL pattern for trap detection.
     Replaces numbers with {N} to identify repeating patterns.
+    Returns both fine-grained and coarse patterns for multi-level detection.
     """
     try:
         parsed = urlparse(url)
-        # Replace all numbers with placeholder
-        pattern = re.sub(r'\d+', '{N}', parsed.path)
-        return f"{parsed.netloc}{pattern}"
+        path = parsed.path
+
+        # Fine-grained: Replace all numbers and common variations
+        fine_pattern = re.sub(r'\d+', '{N}', path)
+        fine_pattern = re.sub(r'[a-zA-Z]\d+', 'X{N}', fine_pattern)  # like photo1, img2
+
+        # Coarse-grained: Get path prefix (up to 3 levels) for broader detection
+        parts = [p for p in path.split('/') if p]
+        if len(parts) > 3:
+            coarse_prefix = '/' + '/'.join(parts[:3]) + '/*'
+        else:
+            coarse_prefix = path
+
+        # Return both patterns
+        return f"{parsed.netloc}{fine_pattern}", f"{parsed.netloc}{coarse_prefix}"
     except Exception:
-        return url
+        return url, url
 
 
 # ============================================================================
@@ -580,6 +800,10 @@ def scraper(url, resp):
     if len(content) < 100:
         return []
 
+    # Check for excessively large files (likely not useful text content)
+    if len(content) > MAX_CONTENT_SIZE:
+        return []
+
     # Extract links early so we still crawl even if analytics skip the page
     links = extract_links(content, resp.raw_response.url if resp.raw_response else url)
 
@@ -619,6 +843,10 @@ def scraper(url, resp):
     # Extract text and words
     text, words, word_count = extract_text_and_words(content)
 
+    # Check for soft 404s (pages that return 200 but are error pages)
+    if is_soft_404(text):
+        return valid_links
+
     # Check for low information content (analytics only)
     if has_low_information(text, word_count):
         return valid_links
@@ -635,14 +863,19 @@ def scraper(url, resp):
     # Record analytics
     analytics.add_page(url, word_count, words, subdomain)
 
-    # Log progress periodically
+    # Log progress and save reports periodically
     stats = analytics.get_stats()
+
+    # Save every 50 pages for better crash recovery
+    if stats["unique_pages"] % 50 == 0:
+        analytics.save_report()
+        analytics.save_trap_report()
+
+    # Log progress every 100 pages (less verbose)
     if stats["unique_pages"] % 100 == 0:
         print(f"\n[PROGRESS] Unique pages: {stats['unique_pages']}, "
               f"Longest page: {stats['longest_page']['word_count']} words, "
               f"Subdomains: {stats['total_subdomains']}\n")
-        # Save intermediate report
-        analytics.save_report()
 
     return valid_links
 
@@ -658,11 +891,18 @@ def classify_url(url):
 
         # Check scheme
         if parsed.scheme not in {"http", "https"}:
+            analytics.record_trap(url, "invalid_scheme")
             return False, "scheme"
 
         # Check if domain is allowed
         if not is_allowed_domain(parsed.netloc):
+            analytics.record_trap(url, "wrong_domain")
             return False, "domain"
+
+        # Check for low-value paths (wp-content, assets, etc.)
+        if is_low_value_path(url):
+            analytics.record_trap(url, "low_value_path")
+            return False, "low_value_path"
 
         # Check for file extensions we want to skip
         path_lower = parsed.path.lower()
@@ -683,21 +923,37 @@ def classify_url(url):
             ".pyc", ".pyo", ".so", ".o", ".a", ".lib", ".deb", ".rpm",
             ".pkg", ".mpg", ".flv", ".webm", ".svg", ".ttf", ".woff",
             ".woff2", ".eot", ".otf", ".bak", ".tmp", ".log", ".out",
-            ".mat", ".m", ".r", ".ipynb", ".nb", ".ss", ".ppsx"
+            ".mat", ".m", ".r", ".ipynb", ".nb", ".ss", ".ppsx",
+            # Source code files (crawled from Apache directory listings)
+            ".cc", ".h", ".hpp", ".cpp", ".c", ".java", ".py", ".pl",
+            ".sh", ".scm", ".rkt", ".odc", ".conf", ".dsw", ".dsp",
+            ".inc", ".sas", ".fig", ".cls", ".tsv", ".txt"
         )
 
         if any(path_lower.endswith(ext) for ext in skip_extensions):
+            analytics.record_trap(url, "file_extension")
             return False, "extension"
 
         # Check for traps
         if is_trap(url):
+            analytics.record_trap(url, "trap_pattern")
             return False, "trap"
 
-        # Check URL pattern frequency (trap detection)
-        pattern = get_url_pattern(url)
-        pattern_count = analytics.record_url_pattern(pattern)
-        if pattern_count > 100:  # Too many similar URLs
-            return False, "pattern_frequency"
+        # Check URL pattern frequency (trap detection) - multi-level
+        fine_pattern, coarse_pattern = get_url_pattern(url)
+
+        # Check fine-grained pattern (e.g., /pix/action/photo{N}.html)
+        fine_count = analytics.record_url_pattern(fine_pattern)
+        if fine_count > MAX_FINE_PATTERN_COUNT:
+            analytics.record_trap(url, "pattern_frequency_fine", fine_pattern)
+            return False, "pattern_frequency_fine"
+
+        # Check coarse-grained pattern (e.g., /~eppstein/pix/*)
+        if MAX_COARSE_PATTERN_COUNT > 0:  # 0 = disabled
+            coarse_count = analytics.record_url_pattern(coarse_pattern)
+            if coarse_count > MAX_COARSE_PATTERN_COUNT:
+                analytics.record_trap(url, "pattern_frequency_coarse", coarse_pattern)
+                return False, "pattern_frequency_coarse"
 
         return True, None
 
@@ -749,6 +1005,9 @@ def print_final_report():
     # Save to file
     analytics.save_report()
     print("Report saved to crawler_report.json")
+
+    analytics.save_trap_report()
+    print("Trap report saved to trap_report.json")
 
 
 # Register cleanup to print report on exit

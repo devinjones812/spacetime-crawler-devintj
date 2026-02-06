@@ -11,8 +11,8 @@ Extra Credit: Multithreading support (+5 points)
 """
 
 import os
-import shelve
 import time
+import pickle
 from threading import RLock, Condition
 from collections import defaultdict
 from queue import Queue, Empty
@@ -20,6 +20,51 @@ from urllib.parse import urlparse
 
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
+
+
+class ThreadSafeDict:
+    """Thread-safe persistent dictionary using pickle."""
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.lock = RLock()
+        self.data = {}
+        if os.path.exists(filename):
+            try:
+                with open(filename, 'rb') as f:
+                    self.data = pickle.load(f)
+            except (EOFError, pickle.UnpicklingError):
+                self.data = {}
+
+    def __setitem__(self, key, value):
+        with self.lock:
+            self.data[key] = value
+
+    def __getitem__(self, key):
+        with self.lock:
+            return self.data[key]
+
+    def __contains__(self, key):
+        with self.lock:
+            return key in self.data
+
+    def __len__(self):
+        with self.lock:
+            return len(self.data)
+
+    def __bool__(self):
+        with self.lock:
+            return bool(self.data)
+
+    def values(self):
+        with self.lock:
+            return list(self.data.values())
+
+    def sync(self):
+        """Persist data to disk."""
+        with self.lock:
+            with open(self.filename, 'wb') as f:
+                pickle.dump(self.data, f)
 
 
 class Frontier(object):
@@ -48,26 +93,27 @@ class Frontier(object):
         
         # All URLs for deduplication
         self._seen_urls = set()
-        
+
         # Track in-flight URLs (checked out but not yet completed)
         self._in_progress = 0
         self._finished = False
-        
+
         # Politeness delay in seconds
         self._politeness_delay = config.time_delay  # Default 0.5s
         
         # Setup persistence
-        if not os.path.exists(self.config.save_file) and not restart:
+        save_path = self.config.save_file + '.pkl'
+        if not os.path.exists(save_path) and not restart:
             self.logger.info(
-                f"Did not find save file {self.config.save_file}, "
+                f"Did not find save file {save_path}, "
                 f"starting from seed.")
-        elif os.path.exists(self.config.save_file) and restart:
+        elif os.path.exists(save_path) and restart:
             self.logger.info(
-                f"Found save file {self.config.save_file}, deleting it.")
-            os.remove(self.config.save_file)
-        
+                f"Found save file {save_path}, deleting it.")
+            os.remove(save_path)
+
         # Load existing save file, or create one if it does not exist
-        self.save = shelve.open(self.config.save_file)
+        self.save = ThreadSafeDict(save_path)
         
         if restart:
             for url in self.config.seed_urls:
@@ -190,18 +236,18 @@ class Frontier(object):
         with self._lock:
             if urlhash in self._seen_urls:
                 return  # Already seen
-            
+
             # Mark as seen
             self._seen_urls.add(urlhash)
-            
+
             # Save to persistence
             self.save[urlhash] = (url, False)
             self.save.sync()
-            
+
             # Add to domain queue
             domain = self._get_domain(url)
             self._domain_queues[domain].append(url)
-            
+
             # Notify waiting workers
             self._condition.notify_all()
     
@@ -218,7 +264,20 @@ class Frontier(object):
             if self._in_progress > 0:
                 self._in_progress -= 1
             self._condition.notify_all()
-    
+
+    def mark_url_failed(self, url):
+        """Re-queue a URL that failed to download (e.g., server error).
+
+        The URL stays as uncompleted in the save file, so it will also
+        be retried on resume if the crawler stops before it succeeds.
+        """
+        with self._lock:
+            domain = self._get_domain(url)
+            self._domain_queues[domain].append(url)
+            if self._in_progress > 0:
+                self._in_progress -= 1
+            self._condition.notify_all()
+
     def get_stats(self):
         """Get frontier statistics."""
         with self._lock:
