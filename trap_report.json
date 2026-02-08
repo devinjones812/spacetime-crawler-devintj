@@ -1,0 +1,355 @@
+{
+  "summary": {
+    "total_urls_blocked": 553911,
+    "trap_types_detected": 7,
+    "top_patterns_blocked": [
+      [
+        "www.informatics.uci.edu/{N}/{N}/",
+        94667
+      ],
+      [
+        "ngs.ics.uci.edu/",
+        4341
+      ],
+      [
+        "ics.uci.edu/happening/news/",
+        4096
+      ],
+      [
+        "ics.uci.edu/~dhirschb/genealogy/Krakow/*",
+        4031
+      ],
+      [
+        "wics.ics.uci.edu/ghc-{N}/",
+        2719
+      ],
+      [
+        "ics.uci.edu/",
+        2697
+      ],
+      [
+        "www.informatics.uci.edu/",
+        2620
+      ],
+      [
+        "www.ics.uci.edu/",
+        2558
+      ],
+      [
+        "ngs.ics.uci.edu/author/ramesh/",
+        2207
+      ],
+      [
+        "www.informatics.uci.edu/undergrad/bs-game-design/",
+        2116
+      ],
+      [
+        "www.informatics.uci.edu/research/labs-centers/",
+        2106
+      ],
+      [
+        "www.informatics.uci.edu/grad/phd-software-engineering/",
+        2102
+      ],
+      [
+        "www.informatics.uci.edu/grad/phd-informatics/",
+        2102
+      ],
+      [
+        "www.informatics.uci.edu/admissions/coming-from-abroad/",
+        2102
+      ],
+      [
+        "www.informatics.uci.edu/undergrad/bs-software-engineering/",
+        2101
+      ],
+      [
+        "www.informatics.uci.edu/admissions/graduate-application-process/",
+        2101
+      ],
+      [
+        "www.informatics.uci.edu/undergrad/bs-informatics/",
+        2100
+      ],
+      [
+        "www.informatics.uci.edu/undergrad/bs-business-information-management/",
+        2100
+      ],
+      [
+        "www.informatics.uci.edu/grad/ms-software-engineering/",
+        2099
+      ],
+      [
+        "www.informatics.uci.edu/undergrad/student-profiles/",
+        2097
+      ]
+    ]
+  },
+  "trap_details": {
+    "wrong_domain": {
+      "count": 90324,
+      "examples": [
+        {
+          "url": "https://recruit.ap.uci.edu/apply"
+        },
+        {
+          "url": "https://recruit.ap.uci.edu/apply"
+        },
+        {
+          "url": "https://uci.edu/privacy/"
+        },
+        {
+          "url": "http://uci.edu/privacy/"
+        },
+        {
+          "url": "https://www.facebook.com/UCI.Informatics"
+        },
+        {
+          "url": "https://twitter.com/UCI_Informatics"
+        },
+        {
+          "url": "https://futurehealth.uci.edu/events/"
+        },
+        {
+          "url": "https://goo.gl/maps/xhK6rgUsdX2Xi7Cm7"
+        },
+        {
+          "url": "http://facebook.com/UCIBrenICS"
+        },
+        {
+          "url": "http://twitter.com/UCIbrenICS"
+        }
+      ]
+    },
+    "trap_pattern": {
+      "count": 5851,
+      "examples": [
+        {
+          "url": "https://courselisting.ics.uci.edu/ugrad_courses/listing-course.php?year=2023&level=Graduate&department=STATS&program=ALL"
+        },
+        {
+          "url": "https://courselisting.ics.uci.edu/ugrad_courses/listing-course.php?year=2023&level=Undergraduate&department=STATS&program=ALL"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-11-03-2025/"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-12-04-2025/"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-01-15-2026/"
+        },
+        {
+          "url": "https://courselisting.ics.uci.edu/ugrad_courses/listing-course.php?year=2023&level=Graduate&department=STATS&program=ALL"
+        },
+        {
+          "url": "https://courselisting.ics.uci.edu/ugrad_courses/listing-course.php?year=2023&level=Undergraduate&department=STATS&program=ALL"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-11-03-2025/"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-11-03-2025/"
+        },
+        {
+          "url": "https://ics.uci.edu/event/professional-masters-programs-information-session-12-04-2025/"
+        }
+      ]
+    },
+    "pattern_frequency_fine": {
+      "count": 396663,
+      "examples": [
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Baffiliation_posts%5D=1988",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Baffiliation_posts%5D=1989",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Bresearch_areas_ics%5D=1994",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Baffiliation_posts%5D=1990",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Bunits%5D=32",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Bunits%5D=32",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Baffiliation_posts%5D=1988",
+          "pattern": "ics.uci.edu/happening/news/"
+        },
+        {
+          "url": "https://ics.uci.edu/happening/news/?filter%5Baffiliation_posts%5D=1989",
+          "pattern": "ics.uci.edu/happening/news/"
+        }
+      ]
+    },
+    "invalid_scheme": {
+      "count": 30596,
+      "examples": [
+        {
+          "url": "maitl:dih11@uci.edu"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/dr-matteo-interlandi-microsoft-query-processing-on-tensor-computation-runtimes/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/farzad-habibi-brook-2pl-tolerating-high-contention-workloads-with-a-deadlock-free-two-phase-locking-protocol/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/research-without-borders-high-performance-computing-for-discovery-across-domains/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/genai-benchmarking-and-evaluation/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/fangqi-liu-vanderbilt-university/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/xiaozhen-liu/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/janki-bhimani-fiu/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/pat-helland/?ical=1"
+        },
+        {
+          "url": "webcal://isg.ics.uci.edu/event/yiming-lin-berkeley/?ical=1"
+        }
+      ]
+    },
+    "file_extension": {
+      "count": 22620,
+      "examples": [
+        {
+          "url": "https://www.ics.uci.edu/~iftekha/files/CV_Iftekhar_ahmed.pdf"
+        },
+        {
+          "url": "https://www.ics.uci.edu/bin/pdf/grad/F19%20Graduate%20Student%20Handbook.pdf"
+        },
+        {
+          "url": "https://ics.uci.edu/~wmt/cvTomlinson.pdf"
+        },
+        {
+          "url": "http://www.informatics.uci.edu//wp-content/uploads/directions.pdf"
+        },
+        {
+          "url": "https://ics.uci.edu/~zhengkai/biography_kai_zheng.txt"
+        },
+        {
+          "url": "https://ics.uci.edu/~zhengkai/cv_kai_zheng.pdf"
+        },
+        {
+          "url": "https://ics.uci.edu/~zhengkai/portrait_kai_zheng.jpg"
+        },
+        {
+          "url": "http://www.ics.uci.edu/~ziv/papers/icsm97.ps"
+        },
+        {
+          "url": "http://www.ics.uci.edu/~ziv/papers/icsmadobe.pdf"
+        },
+        {
+          "url": "http://www.ics.uci.edu/~ziv/papers/hypertext97.ps"
+        }
+      ]
+    },
+    "low_value_path": {
+      "count": 1449,
+      "examples": [
+        {
+          "url": "http://www.informatics.uci.edu/wp-content/uploads/mazmanian_digital_signature.jpeg"
+        },
+        {
+          "url": "http://www.informatics.uci.edu/wp-content/uploads/book_weaponofmassdestruction.jpg"
+        },
+        {
+          "url": "https://cs.ics.uci.edu/wp-content/uploads/sites/2/2024/11/CS-Remote-Work-Stance.pdf"
+        },
+        {
+          "url": "https://hpi.ics.uci.edu/wp-content/uploads/2022/11/HPI-Nov4Event-MediaAdvisory.pdf"
+        },
+        {
+          "url": "http://www.stat.uci.edu/wp-content/uploads/adult-business-computers-256219-e1528405529575.jpg"
+        },
+        {
+          "url": "http://www.stat.uci.edu/wp-content/uploads/Merck_SummerIntern_proposal2019.pdf"
+        },
+        {
+          "url": "http://www.stat.uci.edu/wp-content/uploads/NeoMedix-Statistician-Data-Manager.doc"
+        },
+        {
+          "url": "http://www.informatics.uci.edu/wp-content/uploads/collidbooks_covers_0isbn9780262027823type.jpg"
+        },
+        {
+          "url": "https://ics.uci.edu/wp-content/uploads/2023/08/Initial-Plan-for-the-Honors-Project.pdf"
+        },
+        {
+          "url": "https://ics.uci.edu/wp-content/uploads/2023/08/Initial-Plan-for-the-Honors-Project.pdf"
+        }
+      ]
+    },
+    "pattern_frequency_coarse": {
+      "count": 6408,
+      "examples": [
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2018-fall-project3",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2018-fall-project4",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2018-fall-git",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2018-fall-git",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/TracWiki",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2017-fall",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2017-fall-project1",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2017-fall-project2",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2017-fall-project3",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        },
+        {
+          "url": "https://grape.ics.uci.edu/wiki/public/wiki/cs222p-2017-fall-project4",
+          "pattern": "grape.ics.uci.edu/wiki/public/wiki/*"
+        }
+      ]
+    }
+  }
+}

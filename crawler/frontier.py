@@ -1,37 +1,38 @@
 """
-Thread-safe Frontier with Per-Domain Politeness.
+Thread-safe Frontier with per-domain politeness.
 
-This module implements a thread-safe URL frontier that manages:
-- URL queue with thread-safe operations
-- Per-domain politeness (500ms delay between requests to same domain)
-- Deduplication of URLs
-- Persistence via shelve
-
-Extra Credit: Multithreading support (+5 points)
+Manages the URL queue, deduplication, per-domain rate limiting (500 ms),
+and persistence via pickle.  Extra credit: multithreading support (+5 pts).
 """
 
 import os
 import time
 import pickle
+from collections import defaultdict, deque
 from threading import RLock, Condition
-from collections import defaultdict
-from queue import Queue, Empty
 from urllib.parse import urlparse
 
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
 
 
-class ThreadSafeDict:
-    """Thread-safe persistent dictionary using pickle."""
+# ---------------------------------------------------------------------------
+# Persistent dictionary (pickle-backed, thread-safe)
+# ---------------------------------------------------------------------------
+
+class _PersistentDict:
+    """Thread-safe dict that periodically syncs to a pickle file."""
+
+    _SYNC_INTERVAL = 10  # seconds between automatic syncs
 
     def __init__(self, filename):
         self.filename = filename
         self.lock = RLock()
         self.data = {}
+        self._last_sync = time.time()
         if os.path.exists(filename):
             try:
-                with open(filename, 'rb') as f:
+                with open(filename, "rb") as f:
                     self.data = pickle.load(f)
             except (EOFError, pickle.UnpicklingError):
                 self.data = {}
@@ -61,229 +62,174 @@ class ThreadSafeDict:
             return list(self.data.values())
 
     def sync(self):
-        """Persist data to disk."""
+        """Persist to disk unconditionally."""
         with self.lock:
-            with open(self.filename, 'wb') as f:
-                pickle.dump(self.data, f)
+            snapshot = dict(self.data)
+        with open(self.filename, "wb") as f:
+            pickle.dump(snapshot, f)
+        with self.lock:
+            self._last_sync = time.time()
+
+    def maybe_sync(self):
+        """Persist only if enough time has elapsed since the last sync."""
+        with self.lock:
+            if time.time() - self._last_sync < self._SYNC_INTERVAL:
+                return
+            snapshot = dict(self.data)
+            self._last_sync = time.time()
+        with open(self.filename, "wb") as f:
+            pickle.dump(snapshot, f)
 
 
-class Frontier(object):
+# ---------------------------------------------------------------------------
+# Frontier
+# ---------------------------------------------------------------------------
+
+class Frontier:
     """
-    Thread-safe Frontier implementation with per-domain politeness.
-    
-    Key features:
-    - Thread-safe URL queue operations
-    - Per-domain politeness delay tracking
-    - Multiple domain queues for efficient multithreaded crawling
-    - Persistence for crash recovery
+    Thread-safe URL frontier with per-domain politeness.
+
+    Workers call get_tbd_url() (blocks until a URL is ready) and
+    complete_work_cycle() (atomically adds discovered URLs and marks
+    the source URL done).
     """
-    
+
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
-        
-        # Thread safety locks
-        self._lock = RLock()  # Main lock for shared state
-        self._condition = Condition(self._lock)  # For waiting on new URLs
-        
-        # Per-domain queues and timing
-        self._domain_queues = defaultdict(list)  # domain -> list of URLs
-        self._domain_last_access = defaultdict(float)  # domain -> last access time
-        self._domain_locks = defaultdict(RLock)  # domain -> lock
-        
-        # All URLs for deduplication
-        self._seen_urls = set()
 
-        # Track in-flight URLs (checked out but not yet completed)
+        self._lock = RLock()
+        self._cond = Condition(self._lock)
+
+        self._domain_queues = defaultdict(deque)   # domain -> deque of urls
+        self._domain_last_access = defaultdict(float)
+        self._seen = set()
         self._in_progress = 0
-        self._finished = False
+        self._politeness = config.time_delay       # 0.5 s
 
-        # Politeness delay in seconds
-        self._politeness_delay = config.time_delay  # Default 0.5s
-        
-        # Setup persistence
-        save_path = self.config.save_file + '.pkl'
-        if not os.path.exists(save_path) and not restart:
-            self.logger.info(
-                f"Did not find save file {save_path}, "
-                f"starting from seed.")
-        elif os.path.exists(save_path) and restart:
-            self.logger.info(
-                f"Found save file {save_path}, deleting it.")
+        # Persistence
+        save_path = config.save_file + ".pkl"
+        if os.path.exists(save_path) and restart:
+            self.logger.info(f"Deleting old save file {save_path}.")
             os.remove(save_path)
+        self.save = _PersistentDict(save_path)
 
-        # Load existing save file, or create one if it does not exist
-        self.save = ThreadSafeDict(save_path)
-        
-        if restart:
-            for url in self.config.seed_urls:
+        if restart or not self.save:
+            for url in config.seed_urls:
                 self.add_url(url)
         else:
-            self._parse_save_file()
-            if not self.save:
-                for url in self.config.seed_urls:
-                    self.add_url(url)
-    
-    def _get_domain(self, url):
-        """Extract domain from URL for politeness tracking."""
+            self._restore_from_save()
+
+    # -- internal helpers ---------------------------------------------------
+
+    @staticmethod
+    def _domain_of(url):
         try:
-            parsed = urlparse(url)
-            return parsed.netloc.lower()
+            return urlparse(url).netloc.lower()
         except Exception:
             return "unknown"
-    
-    def _parse_save_file(self):
-        """Load state from save file."""
-        total_count = len(self.save)
-        tbd_count = 0
-        
+
+    def _restore_from_save(self):
+        tbd = 0
         for url, completed in self.save.values():
-            self._seen_urls.add(get_urlhash(url))
-            if not completed and is_valid(url):
-                domain = self._get_domain(url)
-                self._domain_queues[domain].append(url)
-                tbd_count += 1
-        
-        self.logger.info(
-            f"Found {tbd_count} urls to be downloaded from {total_count} "
-            f"total urls discovered.")
-    
-    def _get_total_pending(self):
-        """Get total number of pending URLs across all domains."""
+            self._seen.add(get_urlhash(url))
+            if not completed:
+                self._domain_queues[self._domain_of(url)].append(url)
+                tbd += 1
+        self.logger.info(f"Restored {tbd} pending URLs from {len(self.save)} total.")
+
+    def _total_pending(self):
         return sum(len(q) for q in self._domain_queues.values())
-    
+
+    def _enqueue(self, url):
+        """Add url if unseen.  Must be called while holding _lock."""
+        url = normalize(url)
+        h = get_urlhash(url)
+        if h in self._seen:
+            return
+        self._seen.add(h)
+        self.save[h] = (url, False)
+        self.save.maybe_sync()
+        self._domain_queues[self._domain_of(url)].append(url)
+
+    # -- public API ---------------------------------------------------------
+
+    def add_url(self, url):
+        with self._lock:
+            self._enqueue(url)
+            self._cond.notify_all()
+
     def get_tbd_url(self):
         """
-        Get one URL that needs to be downloaded, respecting per-domain politeness.
-        
-        Returns None if:
-        - All URLs are exhausted and all workers are done
-        - Or if we should stop crawling
-        
-        This method may block if all domains are currently rate-limited.
+        Return the next URL to crawl, blocking until one is available.
+        Returns None when the crawl is truly finished.
         """
         while True:
             with self._lock:
-                # Check if we should stop
-                if self._finished:
-                    return None
-
-                # Find a domain that's ready (respects politeness)
-                current_time = time.time()
+                now = time.time()
                 best_url = None
-                best_domain = None
-                min_wait = float('inf')
+                min_wait = float("inf")
 
-                for domain, urls in list(self._domain_queues.items()):
+                for domain, urls in self._domain_queues.items():
                     if not urls:
                         continue
+                    elapsed = now - self._domain_last_access.get(domain, 0)
+                    if elapsed >= self._politeness:
+                        best_url = urls.popleft()
+                        self._domain_last_access[domain] = time.time()
+                        self._in_progress += 1
+                        return best_url
+                    wait = self._politeness - elapsed
+                    if wait < min_wait:
+                        min_wait = wait
 
-                    last_access = self._domain_last_access.get(domain, 0)
-                    time_since = current_time - last_access
+                pending = self._total_pending()
 
-                    if time_since >= self._politeness_delay:
-                        # This domain is ready
-                        best_url = urls.pop(0)
-                        best_domain = domain
-                        break
-                    else:
-                        # Track minimum wait time
-                        wait_time = self._politeness_delay - time_since
-                        if wait_time < min_wait:
-                            min_wait = wait_time
-
-                if best_url:
-                    # Update last access time and mark in-flight
-                    self._domain_last_access[best_domain] = time.time()
-                    self._in_progress += 1
-                    return best_url
-
-                # Check if there are any URLs left
-                total_pending = self._get_total_pending()
-
-                if total_pending == 0:
-                    # No pending URLs; wait for in-progress workers to add more
-                    if self._in_progress == 0:
-                        stats = self.get_stats()
-                        self.logger.info(
-                            "Frontier empty; stopping crawl. "
-                            f"Seen={stats['total_seen']}, "
-                            f"Pending={stats['pending']}, "
-                            f"InProgress={stats['in_progress']}, "
-                            f"Domains={stats['domains']}")
-                        self._finished = True
-                        self._condition.notify_all()
+                # Truly done: nothing pending and nothing in-flight
+                if pending == 0 and self._in_progress == 0:
+                    self._cond.wait(timeout=2.0)
+                    if self._total_pending() == 0 and self._in_progress == 0:
+                        self.logger.info("Frontier empty — crawl complete.")
                         return None
-                    self._condition.wait(timeout=1.0)
                     continue
 
-                # URLs exist but all domains are rate-limited
-                # Wait for the minimum time needed
-                if min_wait < float('inf'):
-                    wait_time = min(min_wait + 0.01, 0.5)
-                    self._condition.wait(timeout=wait_time)
+                # Wait for politeness or new work
+                if pending == 0:
+                    self._cond.wait(timeout=1.0)
+                elif min_wait < float("inf"):
+                    self._cond.wait(timeout=min(min_wait + 0.01, 0.5))
                 else:
-                    self._condition.wait(timeout=0.1)
-    
-    def add_url(self, url):
-        """
-        Add a URL to the frontier if not already seen.
-        Thread-safe with notification for waiting workers.
-        """
-        url = normalize(url)
-        urlhash = get_urlhash(url)
-        
+                    self._cond.wait(timeout=0.1)
+
+    def complete_work_cycle(self, url, discovered_urls):
+        """Atomically add discovered URLs and mark *url* as completed."""
         with self._lock:
-            if urlhash in self._seen_urls:
-                return  # Already seen
+            for new_url in discovered_urls:
+                self._enqueue(new_url)
 
-            # Mark as seen
-            self._seen_urls.add(urlhash)
+            h = get_urlhash(normalize(url))
+            if h in self.save:
+                self.save[h] = (normalize(url), True)
+                self.save.maybe_sync()
 
-            # Save to persistence
-            self.save[urlhash] = (url, False)
-            self.save.sync()
-
-            # Add to domain queue
-            domain = self._get_domain(url)
-            self._domain_queues[domain].append(url)
-
-            # Notify waiting workers
-            self._condition.notify_all()
-    
-    def mark_url_complete(self, url):
-        """Mark a URL as completed."""
-        urlhash = get_urlhash(url)
-        with self._lock:
-            if urlhash not in self.save:
-                self.logger.error(
-                    f"Completed url {url}, but have not seen it before.")
-            
-            self.save[urlhash] = (url, True)
-            self.save.sync()
             if self._in_progress > 0:
                 self._in_progress -= 1
-            self._condition.notify_all()
+            self._cond.notify_all()
 
     def mark_url_failed(self, url):
-        """Re-queue a URL that failed to download (e.g., server error).
-
-        The URL stays as uncompleted in the save file, so it will also
-        be retried on resume if the crawler stops before it succeeds.
-        """
+        """Re-queue a URL that failed (e.g. server error)."""
         with self._lock:
-            domain = self._get_domain(url)
-            self._domain_queues[domain].append(url)
+            self._domain_queues[self._domain_of(url)].append(url)
             if self._in_progress > 0:
                 self._in_progress -= 1
-            self._condition.notify_all()
+            self._cond.notify_all()
 
     def get_stats(self):
-        """Get frontier statistics."""
         with self._lock:
             return {
-                "total_seen": len(self._seen_urls),
-                "pending": self._get_total_pending(),
-                "domains": len(self._domain_queues),
-                "in_progress": self._in_progress
+                "total_seen": len(self._seen),
+                "pending": self._total_pending(),
+                "in_progress": self._in_progress,
+                "domains_with_pending": sum(1 for q in self._domain_queues.values() if q),
+                "domains_ever_seen": len(self._domain_queues),
             }

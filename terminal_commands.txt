@@ -1,0 +1,16 @@
+TO RESTART:
+pkill -9 -f "python launch.py"; rm -f Logs/crawler.pid && nohup python launch.py --restart > Logs/run.out 2>&1 & sleep 2 && tail -f Logs/run.out
+
+
+TO RESUME:
+nohup python launch.py > Logs/run.out 2>&1 &
+
+TO PAUSE:
+pkill -9 -f "launch.py"
+
+TO MONITOR:
+tail -f crawler.log
+tail -f Logs/CRAWLER.log
+
+TO KEEP AWAKE:
+caffeinate -s -w $(cat Logs/crawler.pid)

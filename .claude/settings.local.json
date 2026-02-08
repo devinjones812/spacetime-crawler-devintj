@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(python -m pip:*)",
+      "Bash(python launch.py:*)",
+      "Bash(nc:*)",
+      "Bash(pkill:*)",
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(kill:*)",
+      "Bash(xargs:*)",
+      "Bash(ps:*)"
+    ]
+  }
+}
