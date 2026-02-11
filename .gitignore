@@ -108,3 +108,9 @@ venv.bak/
 
 *.full.py
 *.shelve
+
+# Crawler runtime artifacts
+Logs/
+*.pkl
+crawler_state.json
+.claude/
