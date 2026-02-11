@@ -22,7 +22,7 @@ def main(config_file, restart):
 
     # --- restart cleanup (BEFORE logger init so FileHandlers start fresh) ---
     if restart:
-        for f in ("crawler_report.json",):
+        for f in ("crawler_report.json", "crawler_state.json"):
             if os.path.exists(f):
                 os.remove(f)
         for name in os.listdir("Logs"):

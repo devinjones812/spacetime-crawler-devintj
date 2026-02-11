@@ -13,7 +13,6 @@ from threading import RLock, Condition
 from urllib.parse import urlparse
 
 from utils import get_logger, get_urlhash, normalize
-from scraper import is_valid
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +104,7 @@ class Frontier:
         self._domain_last_access = defaultdict(float)
         self._seen = set()
         self._in_progress = 0
+        self._shutdown = False
         self._politeness = config.time_delay       # 0.5 s
 
         # Persistence
@@ -166,8 +166,11 @@ class Frontier:
         """
         while True:
             with self._lock:
+                # If another thread already declared shutdown, exit immediately
+                if self._shutdown:
+                    return None
+
                 now = time.time()
-                best_url = None
                 min_wait = float("inf")
 
                 for domain, urls in self._domain_queues.items():
@@ -189,6 +192,8 @@ class Frontier:
                 if pending == 0 and self._in_progress == 0:
                     self._cond.wait(timeout=2.0)
                     if self._total_pending() == 0 and self._in_progress == 0:
+                        self._shutdown = True
+                        self._cond.notify_all()  # wake ALL blocked workers
                         self.logger.info("Frontier empty — crawl complete.")
                         return None
                     continue

@@ -67,7 +67,8 @@ class _SimHashIndex:
 class CrawlerAnalytics:
     """Thread-safe storage for crawler analytics data."""
 
-    def __init__(self, resume_file="crawler_report.json"):
+    def __init__(self, state_file="crawler_state.json",
+                 legacy_file="crawler_report.json"):
         self._lock = RLock()
         self.unique_page_count: int = 0
         self.longest_page = {"url": "", "word_count": 0}
@@ -83,7 +84,11 @@ class CrawlerAnalytics:
         self.subdomain_resumed_counts: dict = {}              # subdomain -> int
 
         self._load_stopwords()
-        self._load_previous_report(resume_file)
+        # Prefer the dedicated state file; fall back to legacy report
+        if os.path.exists(state_file):
+            self._load_state(state_file)
+        elif os.path.exists(legacy_file):
+            self._load_state(legacy_file)
 
     # -- persistence helpers ------------------------------------------------
 
@@ -101,26 +106,28 @@ class CrawlerAnalytics:
                 "a", "an", "and", "the", "to", "of", "in", "is", "it", "for"
             }
 
-    def _load_previous_report(self, filepath):
-        if not os.path.exists(filepath):
-            return
+    def _load_state(self, filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.longest_page = data.get("longest_page", self.longest_page)
+            # Try keys in order of preference (state file -> legacy keys)
             word_data = data.get(
-                "word_frequencies_for_resume",
-                data.get("all_word_frequencies", data.get("top_50_words", [])),
+                "word_frequencies",
+                data.get("word_frequencies_for_resume",
+                         data.get("top_50_words",
+                                  data.get("all_word_frequencies", []))),
             )
             for word, count in word_data:
                 self.word_frequencies[word] = count
             for subdomain, count in data.get("subdomains", []):
                 self.subdomain_resumed_counts[subdomain] = count
             self.previous_unique_count = data.get("unique_pages_count", 0)
-            print(f"[ANALYTICS] Resumed: {self.previous_unique_count} pages, "
+            print(f"[ANALYTICS] Resumed from {filepath}: "
+                  f"{self.previous_unique_count} pages, "
                   f"{len(self.word_frequencies)} words")
         except Exception as e:
-            print(f"[ANALYTICS] Could not load previous report: {e}")
+            print(f"[ANALYTICS] Could not load state from {filepath}: {e}")
 
     # -- recording ----------------------------------------------------------
 
@@ -165,13 +172,6 @@ class CrawlerAnalytics:
 
     # -- queries ------------------------------------------------------------
 
-    def get_top_words(self, n=50):
-        with self._lock:
-            return sorted(
-                self.word_frequencies.items(),
-                key=lambda x: (-x[1], x[0]),
-            )[:n]
-
     def get_subdomain_stats(self):
         with self._lock:
             merged = dict(self.subdomain_resumed_counts)
@@ -183,9 +183,25 @@ class CrawlerAnalytics:
         with self._lock:
             return self.previous_unique_count + self.unique_page_count
 
-    # -- report persistence -------------------------------------------------
+    # -- persistence ---------------------------------------------------------
+
+    def save_state(self, filepath="crawler_state.json"):
+        """Save full state (all word frequencies) for crash recovery."""
+        with self._lock:
+            all_words = sorted(
+                self.word_frequencies.items(), key=lambda x: (-x[1], x[0])
+            )
+            state = {
+                "unique_pages_count": self.get_unique_count(),
+                "longest_page": self.longest_page,
+                "word_frequencies": all_words,
+                "subdomains": self.get_subdomain_stats(),
+            }
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
 
     def save_report(self, filepath="crawler_report.json"):
+        """Save the clean final report (top 50 words only)."""
         with self._lock:
             all_words = sorted(
                 self.word_frequencies.items(), key=lambda x: (-x[1], x[0])
@@ -194,7 +210,6 @@ class CrawlerAnalytics:
                 "unique_pages_count": self.get_unique_count(),
                 "longest_page": self.longest_page,
                 "top_50_words": all_words[:50],
-                "word_frequencies_for_resume": all_words,
                 "subdomains": self.get_subdomain_stats(),
             }
         with open(filepath, "w", encoding="utf-8") as f:
@@ -652,6 +667,7 @@ def scraper(url, resp):
     # Periodic save for crash recovery
     count = analytics.get_unique_count()
     if count % 50 == 0:
+        analytics.save_state()
         analytics.save_report()
     if count % 100 == 0:
         print(f"[PROGRESS] {count} unique pages | "
@@ -660,34 +676,10 @@ def scraper(url, resp):
     return valid_links
 
 
-# ---------------------------------------------------------------------------
-# Final report (printed on exit)
-# ---------------------------------------------------------------------------
-
-def print_final_report():
-    print("\n" + "=" * 70)
-    print("CRAWLER ANALYTICS REPORT")
-    print("=" * 70)
-
-    count = analytics.get_unique_count()
-    print(f"\n1. UNIQUE PAGES: {count}")
-
-    lp = analytics.longest_page
-    print(f"\n2. LONGEST PAGE:\n   URL: {lp['url']}\n   Words: {lp['word_count']}")
-
-    print("\n3. TOP 50 MOST COMMON WORDS:")
-    for i, (word, freq) in enumerate(analytics.get_top_words(50), 1):
-        print(f"   {i:2}. {word}: {freq}")
-
-    subs = analytics.get_subdomain_stats()
-    print(f"\n4. SUBDOMAINS ({len(subs)} total):")
-    for sub, n in subs:
-        print(f"   {sub}, {n}")
-
-    print("=" * 70)
-
+def _on_exit():
+    analytics.save_state()
     analytics.save_report()
-    print("Report saved to crawler_report.json")
+    print("\nCrawler complete! Report saved to crawler_report.json.")
 
 
-atexit.register(print_final_report)
+atexit.register(_on_exit)
