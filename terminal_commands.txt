@@ -14,3 +14,4 @@ tail -f Logs/CRAWLER.log
 
 TO KEEP AWAKE:
 caffeinate -s -w $(cat Logs/crawler.pid)
+
